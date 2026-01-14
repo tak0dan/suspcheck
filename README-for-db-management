@@ -1,0 +1,125 @@
+An example un use of the datapase in order to fill it with data:
+
+START TRANSACTION;
+
+SET @policy_json := JSON_OBJECT(
+  'country', JSON_OBJECT(
+    'iso_code', 'RU',
+    'name', 'russia',
+    'hostility', 3
+  ),
+
+  'cities', JSON_ARRAY(
+    JSON_OBJECT('name', 'Moscow', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Saint Petersburg', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Novosibirsk', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Yekaterinburg', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Kazan', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Nizhny Novgorod', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Chelyabinsk', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Samara', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Omsk', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Rostov-on-Don', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Krasnodar', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Voronezh', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Perm', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Ufa', 'hostility_adjustment', 1),
+    JSON_OBJECT('name', 'Volgograd', 'hostility_adjustment', 1)
+  ),
+
+  'companies', JSON_ARRAY(
+    JSON_OBJECT(
+      'name', 'Rostelecom',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'rostelecom.ru', 'hostility_adjustment', 2),
+        JSON_OBJECT('token', 'rt.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Yandex',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'yandex.ru', 'hostility_adjustment', 2),
+        JSON_OBJECT('token', 'yandex.net', 'hostility_adjustment', 2),
+        JSON_OBJECT('token', 'ya.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Mail.ru Group',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'mail.ru', 'hostility_adjustment', 2),
+        JSON_OBJECT('token', 'vk.com', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Sberbank',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'sberbank.ru', 'hostility_adjustment', 2),
+        JSON_OBJECT('token', 'sber.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Gazprom',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'gazprom.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Rosneft',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'rosneft.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'MTS',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'mts.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Beeline',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'beeline.ru', 'hostility_adjustment', 2)
+      )
+    ),
+    JSON_OBJECT(
+      'name', 'Megafon',
+      'hostility_adjustment', 2,
+      'semantic_tokens', JSON_ARRAY(
+        JSON_OBJECT('token', 'megafon.ru', 'hostility_adjustment', 2)
+      )
+    )
+  ),
+
+  'semantic_tokens', JSON_ARRAY(
+    JSON_OBJECT('token', '.ru', 'hostility_adjustment', 1),
+    JSON_OBJECT('token', '.su', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', '.xn--p1ai', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', 'gosuslugi.ru', 'hostility_adjustment', 3),
+    JSON_OBJECT('token', 'kremlin.ru', 'hostility_adjustment', 3),
+    JSON_OBJECT('token', 'government.ru', 'hostility_adjustment', 3),
+    JSON_OBJECT('token', 'mil.ru', 'hostility_adjustment', 3)
+  ),
+
+  'structural_tokens', JSON_ARRAY(
+    JSON_OBJECT('token', 'ru-msk', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', 'ru-spb', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', 'ru-novosib', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', 'ru-ekb', 'hostility_adjustment', 2),
+    JSON_OBJECT('token', 'asn12389', 'hostility_adjustment', 3),
+    JSON_OBJECT('token', 'asn8359', 'hostility_adjustment', 3),
+    JSON_OBJECT('token', 'asn31133', 'hostility_adjustment', 3)
+  )
+);
+
+CALL ingest_policy_bundle(@policy_json);
+
+COMMIT;
+
