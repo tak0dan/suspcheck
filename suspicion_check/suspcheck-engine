@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+#place it into the /usr/lib/suspcheck/bin/suspcheck-engine
+import sys
+import json
+import os
+import re
+
+# ----------------------------
+# Helpers
+# ----------------------------
+
+def debug(msg):
+    if VERBOSE:
+        print(f"[DEBUG] {msg}", file=sys.stderr)
+
+def die(msg):
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+def clamp(val, lo=-3, hi=3):
+    return max(lo, min(hi, val))
+
+def tokenize(value):
+    if not value:
+        return []
+    return [x.lower() for x in re.split(r"[.@_\-]", value) if x]
+
+def domain_labels(domain):
+    if not domain:
+        return []
+    return domain.lower().strip(".").split(".")
+
+# ----------------------------
+# Main
+# ----------------------------
+
+def main():
+    global VERBOSE
+    VERBOSE = False
+
+    args = sys.argv[1:]
+    policy_dir = None
+
+    # ----------------------------
+    # Phase 1: global args
+    # ----------------------------
+    while args:
+        a = args[0]
+        if not a.startswith("--"):
+            break
+
+        if a == "--policy-dir":
+            if len(args) < 2:
+                die("--policy-dir requires value")
+            policy_dir = args[1]
+            args = args[2:]
+
+        elif a == "--verbose":
+            VERBOSE = True
+            args = args[1:]
+
+        else:
+            die(f"Unknown global option {a}")
+
+    debug(f"Remaining args after global parse: {args}")
+
+    if not policy_dir:
+        die("--policy-dir is required")
+
+    if not args:
+        die("No command specified")
+
+    # ----------------------------
+    # Phase 2: command
+    # ----------------------------
+    cmd = args[0]
+    args = args[1:]
+
+    if cmd != "evaluate":
+        die(f"Unknown command {cmd}")
+
+    # ----------------------------
+    # Phase 3: evaluate args
+    # ----------------------------
+    domain = None
+    email = None
+    country = None
+
+    it = iter(args)
+    for a in it:
+        if a == "--domain":
+            domain = next(it, None)
+        elif a == "--email":
+            email = next(it, None)
+        elif a == "--country":
+            country = next(it, None)
+        elif a == "--verbose":
+            VERBOSE = True
+        else:
+            die(f"Unknown evaluate option {a}")
+
+    debug(f"Parsed evaluate args: domain={domain}, email={email}, country={country}")
+
+    # ----------------------------
+    # Raw domains + label map
+    # ----------------------------
+    raw_domains = set()
+
+    if domain:
+        raw_domains.add(domain.lower())
+
+    if email and "@" in email:
+        raw_domains.add(email.split("@", 1)[1].lower())
+
+    domain_label_map = {
+        d: domain_labels(d)
+        for d in raw_domains
+        if "." in d  # ignore invalid domains like "ru"
+    }
+
+    debug(f"Domain label map: {domain_label_map}")
+
+    # ----------------------------
+    # Load policy JSONs
+    # ----------------------------
+    def load_json(name):
+        path = os.path.join(policy_dir, name)
+        if not os.path.exists(path):
+            die(f"Missing policy file: {name}")
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    countries = load_json("countries.json")
+    semantic_tokens = load_json("semantic_tokens.json")
+    structural_tokens = load_json("structural_tokens.json")
+    reasoning = load_json("reasoning.json")
+
+    hostility = 0
+    signals = []
+    reasoning_candidates = []
+
+    # ----------------------------
+    # Country evaluation
+    # ----------------------------
+    if country and country in countries:
+        delta = int(countries[country]["hostility"])
+        hostility += delta
+        signals.append({
+            "source": "country",
+            "value": country,
+            "delta": delta
+        })
+        if countries[country].get("reasoning"):
+            reasoning_candidates.append((abs(delta), countries[country]["reasoning"]))
+
+    # ----------------------------
+    # Tokenization (segment-based, explicit fallback)
+    # ----------------------------
+    tokens = set()
+    tokens.update(tokenize(domain))
+    tokens.update(tokenize(email))
+
+    debug(f"Segment tokens: {tokens}")
+
+    # ----------------------------
+    # Semantic tokens (LABEL-AWARE)
+    # ----------------------------
+    for entry in semantic_tokens:
+        token = entry.get("token")
+        if not token:
+            continue
+
+        token = token.strip().lower()
+
+        # Never treat dot-rules as semantic
+        if token.startswith("."):
+            continue
+
+        token_labels = token.split(".")
+        delta = int(entry.get("hostility_adjustment", 0))
+        matched = False
+
+        # DNS-label-aware match
+        for d, labels in domain_label_map.items():
+            if len(labels) >= len(token_labels) and \
+               labels[-len(token_labels):] == token_labels:
+                matched = True
+                debug(f"Semantic label match: {token} <= {d}")
+                break
+
+        # EXPLICIT fallback: segment token (intentional only)
+        if not matched and token in tokens:
+            matched = True
+            debug(f"Semantic segment fallback match: {token}")
+
+        if matched:
+            hostility += delta
+            signals.append({
+                "source": "semantic_token",
+                "value": token,
+                "delta": delta
+            })
+            if entry.get("reasoning"):
+                reasoning_candidates.append((abs(delta), entry["reasoning"]))
+
+    # ----------------------------
+    # Structural tokens (TLD / suffix ONLY)
+    # ----------------------------
+    for entry in structural_tokens:
+        token = entry.get("token")
+        if not token or not token.startswith("."):
+            continue
+
+        tld = token[1:]  # ".ru" -> "ru"
+        delta = int(entry.get("hostility_adjustment", 0))
+
+        for d, labels in domain_label_map.items():
+            if labels and labels[-1] == tld:
+                hostility += delta
+                signals.append({
+                    "source": "structural_token",
+                    "value": token,
+                    "delta": delta
+                })
+                debug(f"Structural TLD match: .{tld} <= {d}")
+                if entry.get("reasoning"):
+                    reasoning_candidates.append((abs(delta), entry["reasoning"]))
+                break
+
+    # ----------------------------
+    # Email-based implicit ccTLD
+    # ----------------------------
+    if email and "@" in email:
+        email_domain = email.split("@", 1)[1].lower()
+
+        if country and email_domain == country.lower():
+            delta = int(countries[country]["hostility"])
+            hostility += delta
+            signals.append({
+                "source": "email_cc (implicit)",
+                "value": f"@{email_domain}",
+                "delta": delta
+            })
+            debug(f"Implicit email cc match: @{email_domain}")
+
+
+    # ----------------------------
+    # Implicit ccTLD from country
+    # ----------------------------
+    if country and country.lower() and country in countries:
+        cc = country.lower()
+
+        # Only apply if no explicit .cc structural rule exists
+        explicit_tlds = {
+            entry.get("token")[1:]
+            for entry in structural_tokens
+            if entry.get("token", "").startswith(".")
+        }
+
+        if cc not in explicit_tlds:
+            for d, labels in domain_label_map.items():
+                if labels and labels[-1] == cc:
+                    delta = int(countries[country]["hostility"])
+                    hostility += delta
+                    signals.append({
+                        "source": "structural_tld (implicit)",
+                        "value": f".{cc}",
+                        "delta": delta
+                    })
+                    debug(f"Implicit ccTLD match: .{cc} <= {d}")
+                    break
+
+
+    # ----------------------------
+    # Finalize
+    # ----------------------------
+    final_score = clamp(hostility)
+
+    enforcement = (
+        "allow" if final_score <= 0 else
+        "confirm" if final_score == 1 else
+        "privileged" if final_score == 2 else
+        "deny"
+    )
+
+
+    if reasoning_candidates:
+        reasoning_text = max(reasoning_candidates, key=lambda x: x[0])[1]
+    else:
+        reasoning_text = reasoning.get(str(final_score), {}).get("message", "")
+
+    result = {
+        "hostility": final_score,
+        "enforcement": enforcement,
+        "reason": reasoning_text,
+        "signals": signals
+    }
+
+    print(json.dumps(result, indent=2))
+
+    exit_codes = {
+        "allow": 0,
+        "confirm": 10,
+        "privileged": 20,
+        "deny": 30
+    }
+    sys.exit(exit_codes[enforcement])
+
+if __name__ == "__main__":
+    main()
